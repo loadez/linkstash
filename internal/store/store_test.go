@@ -41,6 +41,18 @@ func newTestStore(t *testing.T) *store.Store {
 		db.Close()
 		t.Fatalf("store: apply migration: %v", err)
 	}
+
+	// Apply the second migration for expires_at column
+	schema2Path := filepath.Join(filepath.Dir(migrationPath(t)), "0002_add_expires_at.sql")
+	schema2, err := os.ReadFile(schema2Path)
+	if err != nil {
+		db.Close()
+		t.Fatalf("store: read migration 0002: %v", err)
+	}
+	if _, err := db.Exec(string(schema2)); err != nil {
+		db.Close()
+		t.Fatalf("store: apply migration 0002: %v", err)
+	}
 	if _, err := db.Exec(`TRUNCATE clicks, links RESTART IDENTITY CASCADE`); err != nil {
 		db.Close()
 		t.Fatalf("store: truncate: %v", err)
@@ -68,7 +80,7 @@ func TestCreateAndGetLink(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	link, err := s.CreateLink(ctx, "", "https://example.com/a")
+	link, err := s.CreateLink(ctx, "", "https://example.com/a", sql.NullTime{})
 	if err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
@@ -92,7 +104,7 @@ func TestCreateLinkWithExplicitCode(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	link, err := s.CreateLink(ctx, "custom", "https://example.com/b")
+	link, err := s.CreateLink(ctx, "custom", "https://example.com/b", sql.NullTime{})
 	if err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
@@ -100,14 +112,14 @@ func TestCreateLinkWithExplicitCode(t *testing.T) {
 		t.Fatalf("expected code 'custom', got %q", link.Code)
 	}
 
-	if _, err := s.CreateLink(ctx, "custom", "https://example.com/c"); err == nil {
+	if _, err := s.CreateLink(ctx, "custom", "https://example.com/c", sql.NullTime{}); err == nil {
 		t.Fatal("expected error creating duplicate code")
 	}
 }
 
 func TestCreateLinkRequiresTargetURL(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.CreateLink(context.Background(), "", ""); err == nil {
+	if _, err := s.CreateLink(context.Background(), "", "", sql.NullTime{}); err == nil {
 		t.Fatal("expected error for empty target_url")
 	}
 }
@@ -123,10 +135,10 @@ func TestListLinks(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateLink(ctx, "one", "https://example.com/1"); err != nil {
+	if _, err := s.CreateLink(ctx, "one", "https://example.com/1", sql.NullTime{}); err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
-	if _, err := s.CreateLink(ctx, "two", "https://example.com/2"); err != nil {
+	if _, err := s.CreateLink(ctx, "two", "https://example.com/2", sql.NullTime{}); err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
 
@@ -143,7 +155,7 @@ func TestRecordClickAndProcessClicks(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	link, err := s.CreateLink(ctx, "clicky", "https://example.com/clicky")
+	link, err := s.CreateLink(ctx, "clicky", "https://example.com/clicky", sql.NullTime{})
 	if err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}
@@ -192,7 +204,7 @@ func TestDeleteLink(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	link, err := s.CreateLink(ctx, "todelete", "https://example.com/delete")
+	link, err := s.CreateLink(ctx, "todelete", "https://example.com/delete", sql.NullTime{})
 	if err != nil {
 		t.Fatalf("CreateLink: %v", err)
 	}

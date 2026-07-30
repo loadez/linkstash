@@ -3,20 +3,23 @@
 package apisrv
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/loadez/linkstash/internal/models"
 	"github.com/loadez/linkstash/internal/store"
 )
 
 type createLinkRequest struct {
-	TargetURL string `json:"target_url"`
-	Code      string `json:"code,omitempty"`
+	TargetURL string     `json:"target_url"`
+	Code      string     `json:"code,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // NewHandler returns the api service's http.Handler backed by s.
@@ -85,7 +88,11 @@ func createLink(s *store.Store, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link, err := s.CreateLink(r.Context(), req.Code, req.TargetURL)
+	expiresAt := sql.NullTime{}
+	if req.ExpiresAt != nil {
+		expiresAt = sql.NullTime{Time: *req.ExpiresAt, Valid: true}
+	}
+	link, err := s.CreateLink(r.Context(), req.Code, req.TargetURL, expiresAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			http.Error(w, "code already in use", http.StatusConflict)

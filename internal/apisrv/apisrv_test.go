@@ -114,4 +114,3 @@ func TestCreateLinkRejectsInvalidCharactersInCode(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
-

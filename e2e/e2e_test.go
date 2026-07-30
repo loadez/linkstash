@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -48,6 +49,19 @@ func TestCreateLinkAndFollowRedirect(t *testing.T) {
 		setup.Close()
 		t.Fatalf("e2e: apply migration: %v", err)
 	}
+
+	// Apply the second migration for expires_at column
+	migration2Path := filepath.Join(filepath.Dir(migrationPath(t)), "0002_add_expires_at.sql")
+	schema2, err := os.ReadFile(migration2Path)
+	if err != nil {
+		setup.Close()
+		t.Fatalf("e2e: read migration 0002: %v", err)
+	}
+	if _, err := setup.Exec(string(schema2)); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: apply migration 0002: %v", err)
+	}
+
 	if _, err := setup.Exec(`TRUNCATE clicks, links RESTART IDENTITY CASCADE`); err != nil {
 		setup.Close()
 		t.Fatalf("e2e: truncate: %v", err)
@@ -113,6 +127,117 @@ func TestCreateLinkAndFollowRedirect(t *testing.T) {
 	}
 }
 
+func TestExpiredLinkReturns410(t *testing.T) {
+	dsn := config.DatabaseURL()
+
+	setup, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Skipf("e2e: cannot open db handle: %v", err)
+	}
+	if err := setup.Ping(); err != nil {
+		setup.Close()
+		t.Skipf("e2e: postgres not reachable at %s: %v", dsn, err)
+	}
+	schema, err := os.ReadFile(migrationPath(t))
+	if err != nil {
+		setup.Close()
+		t.Fatalf("e2e: read migration: %v", err)
+	}
+	// Apply all migrations
+	if _, err := setup.Exec(string(schema)); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: apply migration 0001: %v", err)
+	}
+	migration2Path := filepath.Join(filepath.Dir(migrationPath(t)), "0002_add_expires_at.sql")
+	schema2, err := os.ReadFile(migration2Path)
+	if err != nil {
+		setup.Close()
+		t.Fatalf("e2e: read migration 0002: %v", err)
+	}
+	if _, err := setup.Exec(string(schema2)); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: apply migration 0002: %v", err)
+	}
+	if _, err := setup.Exec(`TRUNCATE clicks, links RESTART IDENTITY CASCADE`); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: truncate: %v", err)
+	}
+	setup.Close()
+
+	s, err := store.Open(dsn)
+	if err != nil {
+		t.Fatalf("e2e: open store: %v", err)
+	}
+	defer s.Close()
+
+	api := httptest.NewServer(apisrv.NewHandler(s))
+	defer api.Close()
+	redirector := httptest.NewServer(redirectsrv.NewHandler(s))
+	defer redirector.Close()
+
+	// 1. Create an already-expired link via the API.
+	expiredTime := time.Now().Add(-time.Hour)
+	expiredBody := strings.NewReader(`{"target_url":"https://example.com/expired","expires_at":"` + expiredTime.Format(time.RFC3339) + `"}`)
+	resp, err := http.Post(api.URL+"/links", "application/json", expiredBody)
+	if err != nil {
+		t.Fatalf("POST /links: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /links: expected 201, got %d", resp.StatusCode)
+	}
+	var link models.Link
+	if err := json.NewDecoder(resp.Body).Decode(&link); err != nil {
+		t.Fatalf("decode created link: %v", err)
+	}
+
+	// 2. Try to follow the expired link.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	redirResp, err := client.Get(redirector.URL + "/" + link.Code)
+	if err != nil {
+		t.Fatalf("GET /%s: %v", link.Code, err)
+	}
+	defer redirResp.Body.Close()
+
+	if redirResp.StatusCode != http.StatusGone {
+		t.Fatalf("expected 410 Gone for expired link, got %d", redirResp.StatusCode)
+	}
+
+	// 3. Create a link with a future expiry and verify it still redirects.
+	futureTime := time.Now().Add(time.Hour)
+	futureBody := strings.NewReader(`{"target_url":"https://example.com/future","expires_at":"` + futureTime.Format(time.RFC3339) + `"}`)
+	resp, err = http.Post(api.URL+"/links", "application/json", futureBody)
+	if err != nil {
+		t.Fatalf("POST /links (future): %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /links (future): expected 201, got %d", resp.StatusCode)
+	}
+	var futureLink models.Link
+	if err := json.NewDecoder(resp.Body).Decode(&futureLink); err != nil {
+		t.Fatalf("decode future link: %v", err)
+	}
+
+	// 4. Follow the future link and verify it redirects properly.
+	futureResp, err := client.Get(redirector.URL + "/" + futureLink.Code)
+	if err != nil {
+		t.Fatalf("GET /%s: %v", futureLink.Code, err)
+	}
+	defer futureResp.Body.Close()
+
+	if futureResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 for non-expired link, got %d", futureResp.StatusCode)
+	}
+	if got := futureResp.Header.Get("Location"); got != "https://example.com/future" {
+		t.Fatalf("expected redirect to target URL, got %q", got)
+	}
+}
+
 func TestDeleteLinkViaAPI(t *testing.T) {
 	dsn := config.DatabaseURL()
 
@@ -132,6 +257,16 @@ func TestDeleteLinkViaAPI(t *testing.T) {
 	if _, err := setup.Exec(string(schema)); err != nil {
 		setup.Close()
 		t.Fatalf("e2e: apply migration: %v", err)
+	}
+	migration2Path := filepath.Join(filepath.Dir(migrationPath(t)), "0002_add_expires_at.sql")
+	schema2, err := os.ReadFile(migration2Path)
+	if err != nil {
+		setup.Close()
+		t.Fatalf("e2e: read migration 0002: %v", err)
+	}
+	if _, err := setup.Exec(string(schema2)); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: apply migration 0002: %v", err)
 	}
 	if _, err := setup.Exec(`TRUNCATE clicks, links RESTART IDENTITY CASCADE`); err != nil {
 		setup.Close()

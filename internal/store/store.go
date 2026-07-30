@@ -65,16 +65,16 @@ func GenerateCode() (string, error) {
 
 // CreateLink inserts a new link. If code is empty, one is generated and
 // retried on collision.
-func (s *Store) CreateLink(ctx context.Context, code, targetURL string) (*models.Link, error) {
+func (s *Store) CreateLink(ctx context.Context, code, targetURL string, expiresAt sql.NullTime) (*models.Link, error) {
 	if targetURL == "" {
 		return nil, errors.New("store: target_url is required")
 	}
 
 	tryInsert := func(c string) (*models.Link, error) {
 		row := s.db.QueryRowContext(ctx,
-			`INSERT INTO links (code, target_url) VALUES ($1, $2)
-			 RETURNING code, target_url, created_at, click_count`,
-			c, targetURL)
+			`INSERT INTO links (code, target_url, expires_at) VALUES ($1, $2, $3)
+			 RETURNING code, target_url, created_at, click_count, expires_at`,
+			c, targetURL, expiresAt)
 		return scanLink(row)
 	}
 
@@ -101,7 +101,7 @@ func (s *Store) CreateLink(ctx context.Context, code, targetURL string) (*models
 // GetLink fetches a single link by code.
 func (s *Store) GetLink(ctx context.Context, code string) (*models.Link, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT code, target_url, created_at, click_count FROM links WHERE code = $1`, code)
+		`SELECT code, target_url, created_at, click_count, expires_at FROM links WHERE code = $1`, code)
 	link, err := scanLink(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -112,7 +112,7 @@ func (s *Store) GetLink(ctx context.Context, code string) (*models.Link, error) 
 // ListLinks returns all links ordered by newest first.
 func (s *Store) ListLinks(ctx context.Context) ([]models.Link, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT code, target_url, created_at, click_count FROM links ORDER BY created_at DESC`)
+		`SELECT code, target_url, created_at, click_count, expires_at FROM links ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list links: %w", err)
 	}
@@ -121,7 +121,7 @@ func (s *Store) ListLinks(ctx context.Context) ([]models.Link, error) {
 	var links []models.Link
 	for rows.Next() {
 		var l models.Link
-		if err := rows.Scan(&l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount); err != nil {
+		if err := rows.Scan(&l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("store: scan link: %w", err)
 		}
 		links = append(links, l)
@@ -193,7 +193,7 @@ func (s *Store) DeleteLink(ctx context.Context, code string) error {
 
 func scanLink(row *sql.Row) (*models.Link, error) {
 	var l models.Link
-	if err := row.Scan(&l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount); err != nil {
+	if err := row.Scan(&l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount, &l.ExpiresAt); err != nil {
 		return nil, err
 	}
 	return &l, nil

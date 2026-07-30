@@ -46,6 +46,7 @@ blocks:
           - cache restore go-mod-$(checksum go.sum)
           - sem-service start postgres
           - psql "postgresql://postgres@localhost:5432/postgres?sslmode=disable" -f migrations/0001_init.sql
+          - psql "postgresql://postgres@localhost:5432/postgres?sslmode=disable" -f migrations/0002_add_expires_at.sql
       env_vars:
         - name: DATABASE_URL
           value: "postgresql://postgres@localhost:5432/postgres?sslmode=disable"
