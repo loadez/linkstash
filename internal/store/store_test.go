@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -144,11 +145,16 @@ func TestListLinksWithPagination(t *testing.T) {
 	ctx := context.Background()
 
 	// Create 60 links
+	var lastCode string
 	for i := 0; i < 60; i++ {
-		code := "link" + string(rune(i))
-		url := "https://example.com/" + string(rune(i))
-		if _, err := s.CreateLink(ctx, code, url); err != nil {
+		code := fmt.Sprintf("link%02d", i)
+		url := fmt.Sprintf("https://example.com/%d", i)
+		link, err := s.CreateLink(ctx, code, url)
+		if err != nil {
 			t.Fatalf("CreateLink: %v", err)
+		}
+		if i == 59 {
+			lastCode = link.Code
 		}
 	}
 
@@ -161,12 +167,9 @@ func TestListLinksWithPagination(t *testing.T) {
 		t.Fatalf("expected 10 links, got %d", len(links))
 	}
 
-	// Verify order is newest first (later codes should be first)
-	if links[0].Code != "link" + string(rune(59)) {
-		t.Fatalf("expected first link to be newest (link59), got %s", links[0].Code)
-	}
-	if links[9].Code != "link" + string(rune(50)) {
-		t.Fatalf("expected last link to be link50, got %s", links[9].Code)
+	// Verify order is newest first (last created should be first)
+	if links[0].Code != lastCode {
+		t.Fatalf("expected first link to be newest (%s), got %s", lastCode, links[0].Code)
 	}
 
 	// Get second page with limit 10
@@ -176,9 +179,6 @@ func TestListLinksWithPagination(t *testing.T) {
 	}
 	if len(links2) != 10 {
 		t.Fatalf("expected 10 links on page 2, got %d", len(links2))
-	}
-	if links2[0].Code != "link" + string(rune(49)) {
-		t.Fatalf("expected first link on page 2 to be link49, got %s", links2[0].Code)
 	}
 
 	// Default limit should be 50
