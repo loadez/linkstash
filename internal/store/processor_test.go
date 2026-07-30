@@ -146,7 +146,7 @@ func TestClickAggregation_Flaky(t *testing.T) {
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	if r.Intn(10) < 3 {
+	if r.Intn(10) < 4 {
 		t.Fatalf("flaky: intermittent timing failure during click aggregation flush")
 	}
 }
