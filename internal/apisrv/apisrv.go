@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/loadez/linkstash/internal/models"
@@ -62,6 +63,11 @@ func createLink(s *store.Store, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateAlias(req.Code); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	link, err := s.CreateLink(r.Context(), req.Code, req.TargetURL)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -97,4 +103,45 @@ func isUniqueViolation(err error) bool {
 	// lib/pq wraps unique_violation as pq.Error with Code 23505; string match
 	// keeps this file free of an extra import for a one-line check.
 	return err != nil && strings.Contains(err.Error(), "23505")
+}
+
+// validateAlias checks that a custom alias code is valid.
+// If code is empty, it's allowed (will be auto-generated).
+// If provided, it must match [a-zA-Z0-9_-]{3,32} and not be a reserved word.
+func validateAlias(code string) error {
+	if code == "" {
+		return nil // empty code is allowed, will be auto-generated
+	}
+
+	// Check reserved words
+	reserved := map[string]bool{
+		"healthz": true,
+		"links":   true,
+	}
+	if reserved[code] {
+		return &aliasError{msg: "code is reserved"}
+	}
+
+	// Check format: [a-zA-Z0-9_-]{3,32}
+	if !isValidAlias(code) {
+		return &aliasError{msg: "code must be 3-32 characters matching [a-zA-Z0-9_-]"}
+	}
+
+	return nil
+}
+
+func isValidAlias(code string) bool {
+	if len(code) < 3 || len(code) > 32 {
+		return false
+	}
+	re := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	return re.MatchString(code)
+}
+
+type aliasError struct {
+	msg string
+}
+
+func (e *aliasError) Error() string {
+	return e.msg
 }

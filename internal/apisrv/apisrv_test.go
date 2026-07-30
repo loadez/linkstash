@@ -61,3 +61,57 @@ func TestHealthz(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 }
+
+func TestCreateLinkRejectsReservedWordHealthz(t *testing.T) {
+	h := apisrv.NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(`{"target_url":"https://example.com","code":"healthz"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateLinkRejectsReservedWordLinks(t *testing.T) {
+	h := apisrv.NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(`{"target_url":"https://example.com","code":"links"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateLinkRejectsTooShortCode(t *testing.T) {
+	h := apisrv.NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(`{"target_url":"https://example.com","code":"a"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateLinkRejectsTooLongCode(t *testing.T) {
+	h := apisrv.NewHandler(nil)
+	// 33 character code (exceeds max of 32)
+	longCode := "a234567890b234567890c234567890d12"
+	body := `{"target_url":"https://example.com","code":"` + longCode + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestCreateLinkRejectsInvalidCharactersInCode(t *testing.T) {
+	h := apisrv.NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/links", strings.NewReader(`{"target_url":"https://example.com","code":"my code!"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
