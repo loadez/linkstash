@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/loadez/linkstash/internal/store"
 )
@@ -39,6 +40,12 @@ func redirectHandler(s *store.Store) http.HandlerFunc {
 			}
 			log.Printf("redirector: get link: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if link has expired
+		if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+			w.WriteHeader(http.StatusGone)
 			return
 		}
 
