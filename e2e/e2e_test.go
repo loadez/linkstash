@@ -48,6 +48,19 @@ func TestCreateLinkAndFollowRedirect(t *testing.T) {
 		setup.Close()
 		t.Fatalf("e2e: apply migration: %v", err)
 	}
+
+	// Apply the second migration for expires_at column
+	migration2Path := filepath.Join(filepath.Dir(migrationPath(t)), "0002_add_expires_at.sql")
+	schema2, err := os.ReadFile(migration2Path)
+	if err != nil {
+		setup.Close()
+		t.Fatalf("e2e: read migration 0002: %v", err)
+	}
+	if _, err := setup.Exec(string(schema2)); err != nil {
+		setup.Close()
+		t.Fatalf("e2e: apply migration 0002: %v", err)
+	}
+
 	if _, err := setup.Exec(`TRUNCATE clicks, links RESTART IDENTITY CASCADE`); err != nil {
 		setup.Close()
 		t.Fatalf("e2e: truncate: %v", err)
