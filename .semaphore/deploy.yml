@@ -1,0 +1,33 @@
+version: v1.0
+name: linkstash deploy (stub)
+agent:
+  machine:
+    type: f1-standard-2
+    os_image: ubuntu2204
+
+global_job_config:
+  prologue:
+    commands:
+      - checkout
+
+blocks:
+  - name: Deploy stub
+    dependencies: []
+    task:
+      secrets:
+        - name: GHCR
+      jobs:
+        - name: docker run + healthz
+          commands:
+            - sem-service start postgres
+            - psql "postgresql://postgres@localhost:5432/postgres?sslmode=disable" -f migrations/0001_init.sql
+            - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            - docker pull ghcr.io/loadez/linkstash/api:$SEMAPHORE_GIT_SHA
+            - >
+              docker run -d --network host --name api-deploy-smoke
+              -e DATABASE_URL="postgresql://postgres@localhost:5432/postgres?sslmode=disable"
+              -e PORT=8080
+              ghcr.io/loadez/linkstash/api:$SEMAPHORE_GIT_SHA
+            - sleep 3
+            - curl -sf http://localhost:8080/healthz
+            - docker stop api-deploy-smoke

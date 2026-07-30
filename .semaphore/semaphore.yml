@@ -1,0 +1,167 @@
+version: v1.0
+name: linkstash
+agent:
+  machine:
+    type: f1-standard-2
+    os_image: ubuntu2204
+
+auto_cancel:
+  running:
+    when: "branch != 'main'"
+
+global_job_config:
+  prologue:
+    commands:
+      - checkout
+      - sem-version go 1.23
+      - export GOPATH=$HOME/go
+      - export PATH="$GOPATH/bin:$PATH"
+
+blocks:
+  - name: Setup
+    dependencies: []
+    task:
+      jobs:
+        - name: go mod download
+          commands:
+            - go mod download
+            - cache store go-mod-$(checksum go.sum) $GOPATH/pkg/mod
+
+  - name: Build
+    dependencies: [Setup]
+    task:
+      prologue:
+        commands:
+          - cache restore go-mod-$(checksum go.sum)
+      jobs:
+        - name: go build
+          commands:
+            - go build ./...
+
+  - name: Test
+    dependencies: [Build]
+    task:
+      prologue:
+        commands:
+          - cache restore go-mod-$(checksum go.sum)
+          - sem-service start postgres
+          - psql "postgresql://postgres@localhost:5432/postgres?sslmode=disable" -f migrations/0001_init.sql
+      env_vars:
+        - name: DATABASE_URL
+          value: "postgresql://postgres@localhost:5432/postgres?sslmode=disable"
+      jobs:
+        - name: gotestsum
+          commands:
+            - go install gotest.tools/gotestsum@latest
+            - gotestsum --junitfile junit-tests.xml --format pkgname -- ./...
+      epilogue:
+        always:
+          commands:
+            - test-results publish junit-tests.xml --name tests
+
+  - name: Lint
+    dependencies: [Build]
+    task:
+      prologue:
+        commands:
+          - cache restore go-mod-$(checksum go.sum)
+      jobs:
+        - name: go vet
+          commands:
+            - go vet ./...
+        - name: golangci-lint
+          commands:
+            - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$GOPATH/bin" v1.63.4
+            - golangci-lint run ./...
+
+  - name: "Docker: api"
+    dependencies: [Build, Test, Lint]
+    run:
+      when: "branch = 'main' or change_in(['/cmd/api/', '/internal/', '/migrations/', '/go.mod', '/go.sum'])"
+    task:
+      secrets:
+        - name: GHCR
+      prologue:
+        commands:
+          - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      jobs:
+        - name: build and push
+          commands:
+            - export IMAGE=ghcr.io/loadez/linkstash/api
+            - docker build -f cmd/api/Dockerfile -t $IMAGE:$SEMAPHORE_GIT_SHA .
+            - docker push $IMAGE:$SEMAPHORE_GIT_SHA
+            - |
+              if [ "$SEMAPHORE_GIT_BRANCH" = "main" ]; then
+                docker tag $IMAGE:$SEMAPHORE_GIT_SHA $IMAGE:latest
+                docker push $IMAGE:latest
+              fi
+
+  - name: "Docker: redirector"
+    dependencies: [Build, Test, Lint]
+    run:
+      when: "branch = 'main' or change_in(['/cmd/redirector/', '/internal/', '/migrations/', '/go.mod', '/go.sum'])"
+    task:
+      secrets:
+        - name: GHCR
+      prologue:
+        commands:
+          - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      jobs:
+        - name: build and push
+          commands:
+            - export IMAGE=ghcr.io/loadez/linkstash/redirector
+            - docker build -f cmd/redirector/Dockerfile -t $IMAGE:$SEMAPHORE_GIT_SHA .
+            - docker push $IMAGE:$SEMAPHORE_GIT_SHA
+            - |
+              if [ "$SEMAPHORE_GIT_BRANCH" = "main" ]; then
+                docker tag $IMAGE:$SEMAPHORE_GIT_SHA $IMAGE:latest
+                docker push $IMAGE:latest
+              fi
+
+  - name: "Docker: worker"
+    dependencies: [Build, Test, Lint]
+    run:
+      when: "branch = 'main' or change_in(['/cmd/worker/', '/internal/', '/migrations/', '/go.mod', '/go.sum'])"
+    task:
+      secrets:
+        - name: GHCR
+      prologue:
+        commands:
+          - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      jobs:
+        - name: build and push
+          commands:
+            - export IMAGE=ghcr.io/loadez/linkstash/worker
+            - docker build -f cmd/worker/Dockerfile -t $IMAGE:$SEMAPHORE_GIT_SHA .
+            - docker push $IMAGE:$SEMAPHORE_GIT_SHA
+            - |
+              if [ "$SEMAPHORE_GIT_BRANCH" = "main" ]; then
+                docker tag $IMAGE:$SEMAPHORE_GIT_SHA $IMAGE:latest
+                docker push $IMAGE:latest
+              fi
+
+  - name: "Docker: web"
+    dependencies: [Build, Test, Lint]
+    run:
+      when: "branch = 'main' or change_in(['/cmd/web/', '/internal/', '/migrations/', '/go.mod', '/go.sum'])"
+    task:
+      secrets:
+        - name: GHCR
+      prologue:
+        commands:
+          - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+      jobs:
+        - name: build and push
+          commands:
+            - export IMAGE=ghcr.io/loadez/linkstash/web
+            - docker build -f cmd/web/Dockerfile -t $IMAGE:$SEMAPHORE_GIT_SHA .
+            - docker push $IMAGE:$SEMAPHORE_GIT_SHA
+            - |
+              if [ "$SEMAPHORE_GIT_BRANCH" = "main" ]; then
+                docker tag $IMAGE:$SEMAPHORE_GIT_SHA $IMAGE:latest
+                docker push $IMAGE:latest
+              fi
+
+promotions:
+  - name: Deploy
+    pipeline_file: deploy.yml

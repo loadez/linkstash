@@ -1,0 +1,21 @@
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - gosimple
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    # Checking the error from a deferred/inline Close() on a DB handle,
+    # rows cursor, or response body is noise in a codebase this small;
+    # exclude the whole io.Closer.Close family rather than sprinkling
+    # `_ = x.Close()` everywhere.
+    exclude-functions:
+      - (io.Closer).Close

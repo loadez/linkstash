@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: linkstash
+      POSTGRES_PASSWORD: linkstash
+      POSTGRES_DB: linkstash
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkstash"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://linkstash:linkstash@postgres:5432/linkstash?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redirector:
+    build:
+      context: .
+      dockerfile: cmd/redirector/Dockerfile
+    environment:
+      DATABASE_URL: postgres://linkstash:linkstash@postgres:5432/linkstash?sslmode=disable
+      PORT: "8081"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: cmd/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgres://linkstash:linkstash@postgres:5432/linkstash?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: cmd/web/Dockerfile
+    environment:
+      DATABASE_URL: postgres://linkstash:linkstash@postgres:5432/linkstash?sslmode=disable
+      PORT: "8082"
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
