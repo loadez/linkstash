@@ -18,11 +18,18 @@ type createLinkRequest struct {
 	Code      string `json:"code,omitempty"`
 }
 
+type statsResponse struct {
+	Code       string    `json:"code"`
+	ClickCount int64     `json:"click_count"`
+	CreatedAt  string    `json:"created_at"`
+}
+
 // NewHandler returns the api service's http.Handler backed by s.
 func NewHandler(s *store.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
 	mux.HandleFunc("/links", linksHandler(s))
+	mux.HandleFunc("GET /links/{code}/stats", statsHandler(s))
 	return mux
 }
 
@@ -91,6 +98,31 @@ func listLinks(s *store.Store, w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(links)
+}
+
+func statsHandler(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		code := r.PathValue("code")
+		link, err := s.GetLink(r.Context(), code)
+		if err != nil {
+			if err == store.ErrNotFound {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("api: get link stats: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		resp := statsResponse{
+			Code:       link.Code,
+			ClickCount: link.ClickCount,
+			CreatedAt:  link.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }
 
 func isUniqueViolation(err error) bool {
