@@ -57,8 +57,11 @@ func TestTokenBucket_Refill(t *testing.T) {
 	tb := NewTokenBucket(2, 10) // 10 tokens per second = 1 per 100ms
 
 	// Consume both tokens
-	if !tb.Allow() || !tb.Allow() {
-		t.Fatal("expected first two requests to be allowed")
+	if !tb.Allow() {
+		t.Fatal("expected first request to be allowed")
+	}
+	if !tb.Allow() {
+		t.Fatal("expected second request to be allowed")
 	}
 
 	// Third request should be denied
@@ -85,8 +88,11 @@ func TestRateLimiter_PerIPIsolation(t *testing.T) {
 	defer rl.Close()
 
 	// IP 1 uses up its capacity
-	if !rl.Allow("192.168.1.1") || !rl.Allow("192.168.1.1") {
-		t.Fatal("expected first two requests from IP1 to be allowed")
+	if !rl.Allow("192.168.1.1") {
+		t.Fatal("expected first request from IP1 to be allowed")
+	}
+	if !rl.Allow("192.168.1.1") {
+		t.Fatal("expected second request from IP1 to be allowed")
 	}
 
 	// IP 1 should be rate limited
@@ -95,8 +101,11 @@ func TestRateLimiter_PerIPIsolation(t *testing.T) {
 	}
 
 	// IP 2 should not be rate limited (different IP)
-	if !rl.Allow("192.168.1.2") || !rl.Allow("192.168.1.2") {
-		t.Error("expected requests from IP2 to be allowed")
+	if !rl.Allow("192.168.1.2") {
+		t.Error("expected first request from IP2 to be allowed")
+	}
+	if !rl.Allow("192.168.1.2") {
+		t.Error("expected second request from IP2 to be allowed")
 	}
 
 	// IP 2 should be rate limited now
