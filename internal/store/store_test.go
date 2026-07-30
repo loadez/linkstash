@@ -130,12 +130,64 @@ func TestListLinks(t *testing.T) {
 		t.Fatalf("CreateLink: %v", err)
 	}
 
-	links, err := s.ListLinks(ctx)
+	links, err := s.ListLinks(ctx, 0, 0)
 	if err != nil {
 		t.Fatalf("ListLinks: %v", err)
 	}
 	if len(links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(links))
+	}
+}
+
+func TestListLinksWithPagination(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create 60 links
+	for i := 0; i < 60; i++ {
+		code := "link" + string(rune(i))
+		url := "https://example.com/" + string(rune(i))
+		if _, err := s.CreateLink(ctx, code, url); err != nil {
+			t.Fatalf("CreateLink: %v", err)
+		}
+	}
+
+	// Get first page with limit 10
+	links, err := s.ListLinks(ctx, 10, 0)
+	if err != nil {
+		t.Fatalf("ListLinks: %v", err)
+	}
+	if len(links) != 10 {
+		t.Fatalf("expected 10 links, got %d", len(links))
+	}
+
+	// Verify order is newest first (later codes should be first)
+	if links[0].Code != "link" + string(rune(59)) {
+		t.Fatalf("expected first link to be newest (link59), got %s", links[0].Code)
+	}
+	if links[9].Code != "link" + string(rune(50)) {
+		t.Fatalf("expected last link to be link50, got %s", links[9].Code)
+	}
+
+	// Get second page with limit 10
+	links2, err := s.ListLinks(ctx, 10, 10)
+	if err != nil {
+		t.Fatalf("ListLinks (page 2): %v", err)
+	}
+	if len(links2) != 10 {
+		t.Fatalf("expected 10 links on page 2, got %d", len(links2))
+	}
+	if links2[0].Code != "link" + string(rune(49)) {
+		t.Fatalf("expected first link on page 2 to be link49, got %s", links2[0].Code)
+	}
+
+	// Default limit should be 50
+	links3, err := s.ListLinks(ctx, 0, 0)
+	if err != nil {
+		t.Fatalf("ListLinks (default limit): %v", err)
+	}
+	if len(links3) != 50 {
+		t.Fatalf("expected 50 links with default limit, got %d", len(links3))
 	}
 }
 

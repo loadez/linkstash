@@ -36,7 +36,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		links, err := s.ListLinks(r.Context())
+		links, err := s.ListLinks(r.Context(), 0, 0)
 		if err != nil {
 			log.Printf("web: list links: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
