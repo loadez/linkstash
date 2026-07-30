@@ -32,6 +32,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	processor := store.NewRetryProcessor(s)
+
 	log.Printf("worker: processing clicks every %s", interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -42,7 +44,7 @@ func main() {
 			log.Println("worker: shutting down")
 			return
 		case <-ticker.C:
-			n, err := s.ProcessClicks(ctx)
+			n, err := processor.ProcessClicks(ctx)
 			if err != nil {
 				log.Printf("worker: process clicks: %v", err)
 				continue
