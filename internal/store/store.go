@@ -109,10 +109,19 @@ func (s *Store) GetLink(ctx context.Context, code string) (*models.Link, error) 
 	return link, err
 }
 
-// ListLinks returns all links ordered by newest first.
-func (s *Store) ListLinks(ctx context.Context) ([]models.Link, error) {
+// ListLinks returns links ordered by newest first, with pagination support.
+// limit defaults to 50 if <= 0; offset defaults to 0.
+func (s *Store) ListLinks(ctx context.Context, limit, offset int) ([]models.Link, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT code, target_url, created_at, click_count FROM links ORDER BY created_at DESC`)
+		`SELECT code, target_url, created_at, click_count FROM links ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+		limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("store: list links: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/loadez/linkstash/internal/models"
@@ -79,7 +80,22 @@ func createLink(s *store.Store, w http.ResponseWriter, r *http.Request) {
 }
 
 func listLinks(s *store.Store, w http.ResponseWriter, r *http.Request) {
-	links, err := s.ListLinks(r.Context())
+	limit := 50 // default
+	offset := 0
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	links, err := s.ListLinks(r.Context(), limit, offset)
 	if err != nil {
 		log.Printf("api: list links: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
