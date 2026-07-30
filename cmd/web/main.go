@@ -81,5 +81,8 @@ func main() {
 	slog.Info("web: listening", slog.String("addr", addr))
 
 	handler := loggingMiddleware(logger, mux)
-	slog.Error("web: listen and serve", slog.Any("error", http.ListenAndServe(addr, handler)))
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		slog.Error("web: listen and serve", slog.Any("error", err))
+		return
+	}
 }
