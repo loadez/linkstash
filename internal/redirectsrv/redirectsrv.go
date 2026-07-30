@@ -12,11 +12,30 @@ import (
 )
 
 // NewHandler returns the redirector service's http.Handler backed by s.
+// The handler includes per-IP rate limiting.
 func NewHandler(s *store.Store) http.Handler {
+	// Create a rate limiter: 100 requests per second capacity, 100 requests/second refill rate
+	// This allows bursts of 100 requests, with refill at 100 req/sec
+	rl := NewRateLimiter(100, 100)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
-	mux.HandleFunc("/", redirectHandler(s))
+	mux.HandleFunc("/", rateLimitMiddleware(rl)(redirectHandler(s)))
 	return mux
+}
+
+// rateLimitMiddleware returns a middleware that applies rate limiting based on client IP.
+func rateLimitMiddleware(rl *RateLimiter) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			clientIP := getClientIP(r)
+			if !rl.Allow(clientIP) {
+				http.Error(w, "too many requests", http.StatusTooManyRequests)
+				return
+			}
+			next(w, r)
+		}
+	}
 }
 
 func healthzHandler(w http.ResponseWriter, r *http.Request) {

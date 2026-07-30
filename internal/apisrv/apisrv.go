@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ func NewHandler(s *store.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
 	mux.HandleFunc("/links", linksHandler(s))
+	mux.HandleFunc("/links/", linksDetailHandler(s))
 	return mux
 }
 
@@ -47,6 +49,22 @@ func linksHandler(s *store.Store) http.HandlerFunc {
 	}
 }
 
+func linksDetailHandler(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		code := strings.TrimPrefix(r.URL.Path, "/links/")
+		if code == "" {
+			http.Error(w, "code is required", http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodDelete:
+			deleteLink(s, w, r, code)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
 func createLink(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	var req createLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -62,6 +80,11 @@ func createLink(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	u, err := url.ParseRequestURI(req.TargetURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		http.Error(w, "target_url must be a valid http(s) URL", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateAlias(req.Code); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -100,8 +123,63 @@ func listLinks(s *store.Store, w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(links)
 }
 
+func deleteLink(s *store.Store, w http.ResponseWriter, r *http.Request, code string) {
+	err := s.DeleteLink(r.Context(), code)
+	if err != nil {
+		if err == store.ErrNotFound {
+			http.Error(w, "link not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("api: delete link: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func isUniqueViolation(err error) bool {
 	// lib/pq wraps unique_violation as pq.Error with Code 23505; string match
 	// keeps this file free of an extra import for a one-line check.
 	return err != nil && strings.Contains(err.Error(), "23505")
+}
+
+// validateAlias checks that a custom alias code is valid.
+// If code is empty, it's allowed (will be auto-generated).
+// If provided, it must match [a-zA-Z0-9_-]{3,32} and not be a reserved word.
+func validateAlias(code string) error {
+	if code == "" {
+		return nil // empty code is allowed, will be auto-generated
+	}
+
+	// Check reserved words
+	reserved := map[string]bool{
+		"healthz": true,
+		"links":   true,
+	}
+	if reserved[code] {
+		return &aliasError{msg: "code is reserved"}
+	}
+
+	// Check format: [a-zA-Z0-9_-]{3,32}
+	if !isValidAlias(code) {
+		return &aliasError{msg: "code must be 3-32 characters matching [a-zA-Z0-9_-]"}
+	}
+
+	return nil
+}
+
+func isValidAlias(code string) bool {
+	if len(code) < 3 || len(code) > 32 {
+		return false
+	}
+	re := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	return re.MatchString(code)
+}
+
+type aliasError struct {
+	msg string
+}
+
+func (e *aliasError) Error() string {
+	return e.msg
 }

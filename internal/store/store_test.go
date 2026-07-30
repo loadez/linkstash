@@ -199,3 +199,51 @@ func TestRecordClickAndProcessClicks(t *testing.T) {
 		t.Fatalf("expected 0 links updated on second run, got %d", n)
 	}
 }
+
+func TestDeleteLink(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	link, err := s.CreateLink(ctx, "todelete", "https://example.com/delete", sql.NullTime{})
+	if err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+
+	// Record some clicks
+	for i := 0; i < 2; i++ {
+		if err := s.RecordClick(ctx, link.Code); err != nil {
+			t.Fatalf("RecordClick: %v", err)
+		}
+	}
+
+	// Delete the link
+	err = s.DeleteLink(ctx, link.Code)
+	if err != nil {
+		t.Fatalf("DeleteLink: %v", err)
+	}
+
+	// Verify the link no longer exists
+	_, err = s.GetLink(ctx, link.Code)
+	if err != store.ErrNotFound {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+
+	// Verify it's not in the list
+	links, err := s.ListLinks(ctx)
+	if err != nil {
+		t.Fatalf("ListLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Code == "todelete" {
+			t.Fatal("expected link to be removed from list after delete")
+		}
+	}
+}
+
+func TestDeleteLinkNotFound(t *testing.T) {
+	s := newTestStore(t)
+	err := s.DeleteLink(context.Background(), "doesnotexist")
+	if err != store.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
