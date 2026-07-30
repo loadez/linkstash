@@ -1,7 +1,9 @@
 package models
 
-import "database/sql"
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 // Link represents a shortened URL.
 type Link struct {
