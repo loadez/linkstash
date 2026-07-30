@@ -24,6 +24,7 @@ func NewHandler(s *store.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
 	mux.HandleFunc("/links", linksHandler(s))
+	mux.HandleFunc("/links/", linksDetailHandler(s))
 	return mux
 }
 
@@ -39,6 +40,22 @@ func linksHandler(s *store.Store) http.HandlerFunc {
 			createLink(s, w, r)
 		case http.MethodGet:
 			listLinks(s, w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func linksDetailHandler(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		code := strings.TrimPrefix(r.URL.Path, "/links/")
+		if code == "" {
+			http.Error(w, "code is required", http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodDelete:
+			deleteLink(s, w, r, code)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -97,6 +114,20 @@ func listLinks(s *store.Store, w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(links)
+}
+
+func deleteLink(s *store.Store, w http.ResponseWriter, r *http.Request, code string) {
+	err := s.DeleteLink(r.Context(), code)
+	if err != nil {
+		if err == store.ErrNotFound {
+			http.Error(w, "link not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("api: delete link: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func isUniqueViolation(err error) bool {

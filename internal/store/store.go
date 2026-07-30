@@ -174,6 +174,23 @@ func (s *Store) ProcessClicks(ctx context.Context) (int64, error) {
 	return updated, nil
 }
 
+// DeleteLink removes a link and its associated clicks via cascade.
+// Returns ErrNotFound if the code does not exist.
+func (s *Store) DeleteLink(ctx context.Context, code string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM links WHERE code = $1`, code)
+	if err != nil {
+		return fmt.Errorf("store: delete link: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func scanLink(row *sql.Row) (*models.Link, error) {
 	var l models.Link
 	if err := row.Scan(&l.Code, &l.TargetURL, &l.CreatedAt, &l.ClickCount); err != nil {
