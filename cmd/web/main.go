@@ -3,8 +3,9 @@ package main
 
 import (
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/loadez/linkstash/internal/config"
 	"github.com/loadez/linkstash/internal/store"
@@ -23,12 +24,40 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
 </body>
 </html>`))
 
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		duration := time.Since(start)
+		logger.InfoContext(r.Context(), "request",
+			slog.String("method", r.Method),
+			slog.String("path", r.RequestURI),
+			slog.Int("status", rw.statusCode),
+			slog.Duration("duration", duration),
+		)
+	})
+}
+
 func main() {
 	s, err := store.Open(config.DatabaseURL())
 	if err != nil {
-		log.Fatalf("web: connect to db: %v", err)
+		slog.Error("web: connect to db", slog.Any("error", err))
+		return
 	}
 	defer s.Close()
+
+	logger := slog.Default()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -38,17 +67,22 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		links, err := s.ListLinks(r.Context())
 		if err != nil {
-			log.Printf("web: list links: %v", err)
+			slog.ErrorContext(r.Context(), "web: list links", slog.Any("error", err))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := pageTmpl.Execute(w, links); err != nil {
-			log.Printf("web: render template: %v", err)
+			slog.ErrorContext(r.Context(), "web: render template", slog.Any("error", err))
 		}
 	})
 
 	addr := config.Addr("8082")
-	log.Printf("web: listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	slog.Info("web: listening", slog.String("addr", addr))
+
+	handler := loggingMiddleware(logger, mux)
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		slog.Error("web: listen and serve", slog.Any("error", err))
+		return
+	}
 }
