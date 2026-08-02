@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"testing"
 	"time"
 )
@@ -121,5 +122,31 @@ func TestRetryProcessorRespectsCancelledContext(t *testing.T) {
 	}
 	if mock.Attempts > 1 {
 		t.Fatalf("expected at most 1 attempt with cancelled context, got %d", mock.Attempts)
+	}
+}
+
+// DEMO: intentionally flaky
+//
+// TestClickAggregation_Flaky simulates a click-aggregation batch job racing
+// against a jittery downstream flush. It fails ~30% of the time, non-
+// deterministically, to seed real flaky-test history for the demo. It is
+// seeded from wall-clock time, so it varies across otherwise-identical CI
+// runs rather than being pinned to one outcome. Not a real bug; do not "fix"
+// by removing the randomness — that's the point of this test.
+func TestClickAggregation_Flaky(t *testing.T) {
+	mock := &MockClickProcessor{FailCount: 0}
+	rp := NewRetryProcessorWithConfig(mock, 3, 5*time.Millisecond)
+
+	n, err := rp.ProcessClicks(context.Background())
+	if err != nil {
+		t.Fatalf("ProcessClicks: %v", err)
+	}
+	if n != 42 {
+		t.Fatalf("expected 42 clicks aggregated, got %d", n)
+	}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	if r.Intn(10) < 4 {
+		t.Fatalf("flaky: intermittent timing failure during click aggregation flush")
 	}
 }
